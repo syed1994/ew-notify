@@ -7,6 +7,17 @@ Shared **ntfy + macOS** alerts for the **paper trading** stack (`ew-paper-tradin
 | `ew-paper-sk-alerts` | Mac → iPhone (status, trades, coach) |
 | `ew-sk-paper-cmd` | iPhone → Mac (`status` / `start` / `stop`) |
 
+## Elliott Wave on alerts (display only)
+
+This package **does not compute** waves. It formats `bias` and `wave_count` from the watcher scan / trade payload.
+
+| Field | Typical values | Meaning |
+|-------|----------------|---------|
+| `bias` | `impulse_up` / `impulse_down` / `correction` | 15m swing bias from the watcher |
+| `wave_count` | `15m-W3-up`, `5m-W4-done`, `5m-ABC-C`, `5m-W5-chase`, `15m-end-diag-W5` | Setup / veto label |
+
+How those labels are produced: [`ew-paper-trading/docs/elliott-wave-rules.md`](../ew-paper-trading/docs/elliott-wave-rules.md) § How the watcher uses Elliott Wave.
+
 ## Install
 
 ```bash

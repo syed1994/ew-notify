@@ -19,6 +19,15 @@ DEFAULT_TOPICS = {
         "alerts_topic": "ew-sk-paper-alerts",
         "commands_topic": "ew-sk-paper-cmd",
     },
+    # Equity book (legacy profile name: upstox)
+    "equity": {
+        "alerts_topic": "ew-sk-equity-trade-alert",
+        "commands_topic": None,
+    },
+    "upstox": {
+        "alerts_topic": "ew-sk-equity-trade-alert",
+        "commands_topic": None,
+    },
 }
 
 
@@ -56,6 +65,12 @@ def project_root() -> Path:
 
 def profile() -> str:
     return str(ctx()["profile"])
+
+
+def is_equity_profile(name: str | None = None) -> bool:
+    """True for equity book (profile equity or legacy upstox)."""
+    p = (name or profile()).lower().strip()
+    return p in ("equity", "upstox")
 
 
 def state_dir(root: Path | None = None) -> Path:

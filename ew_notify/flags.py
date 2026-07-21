@@ -45,8 +45,44 @@ def kite_active(root: Path | None = None) -> bool:
 
 def kite_last_ltp(root: Path | None = None) -> float | None:
     data = _load_json(state_dir(root) / "kite-session.json")
-    ltp = data.get("ltp")
+    ltp = data.get("spot_ltp", data.get("ltp"))
     return float(ltp) if ltp is not None else None
+
+
+def kite_session_info(root: Path | None = None) -> dict[str, Any]:
+    """Full kite-session.json payload when connected within TTL."""
+    if not kite_active(root):
+        return {}
+    return _load_json(state_dir(root) / "kite-session.json")
+
+
+def kite_status_lines(root: Path | None = None) -> tuple[bool, str]:
+    """Return (active, one-line detail for phone status)."""
+    info = kite_session_info(root)
+    if not info:
+        return False, "run kite_login.py then kite_ctl.py verify"
+
+    source = str(info.get("source") or "")
+    spot = info.get("spot_ltp", info.get("ltp"))
+    fut = info.get("fut_ltp")
+    fut_sym = info.get("fut_symbol") or ""
+
+    if source in ("kite_connect", "upstox", "upstox_candle", "upstox_quote"):
+        label = "Kite Connect" if source.startswith("kite") else source.replace("_", " ")
+        bits = [f"✓ {label}"]
+        if spot is not None:
+            bits.append(f"spot {spot}")
+        if fut is not None:
+            short = str(fut_sym).split(":")[-1] if fut_sym else "FUT"
+            bits.append(f"{short} {fut}")
+        return True, " · ".join(bits)
+
+    # Legacy Cursor MCP verify (spot may be index or a single equity LTP)
+    if spot is not None:
+        detail = f"✓ Kite MCP · LTP {spot}"
+    else:
+        detail = "✓ Kite MCP · verified"
+    return True, detail
 
 
 def _pgrep_loop() -> bool:
