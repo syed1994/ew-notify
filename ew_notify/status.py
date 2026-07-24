@@ -31,7 +31,7 @@ SERVICE_LABELS = {
     "ws_trigger": ("Kite WS ticks", "live FUT ticks → paper breakout"),
 }
 
-# Equity book (ew-paper-trading-upstox) — launchd labels still *upstox*, ctl keys are equity_*
+# Equity book (ew-paper-trading-equity) — launchd labels use equity_*; ctl is watcher_ctl.sh
 EQUITY_SERVICE_LABELS = {
     "equity_watcher": ("Equity watcher", "3 min EQ scan → Excel / paper"),
     "equity_agent_watch": ("Equity agent watch", "15 min log + coach"),
@@ -124,6 +124,15 @@ def _market_block(scans: dict[str, Any], cfg: dict[str, Any], root: Path) -> lis
                     lines.append(
                         f"  15m  {scan.get('bias', '—')}  ·  {scan.get('wave_count', '—')}"
                     )
+                    vwap = scan.get("vwap")
+                    ltp = scan.get("ltp")
+                    try:
+                        if vwap is not None and ltp is not None and float(vwap) > 0:
+                            gap = (float(ltp) / float(vwap) - 1.0) * 100.0
+                            side = "above" if gap >= 0 else "below"
+                            lines.append(f"  VWAP  {float(vwap):.1f}  ·  {side} ({gap:+.2f}%)")
+                    except (TypeError, ValueError):
+                        pass
                     if scan.get("skip_reason"):
                         lines.append(f"  skip  {scan['skip_reason']}")
     else:
@@ -210,7 +219,10 @@ def _positions_block(scans: dict[str, Any], root: Path, *, title: str = "Paper")
 def _equity_services_block(equity_root: Path) -> list[str]:
     """Services for Nifty-50 equity paper book (Kite candles + WS ticks)."""
     lines: list[str] = []
-    ctl = equity_root / "scripts" / "watcher_ctl_upstox.sh"
+    # Prefer current equity ctl; fall back to legacy Upstox-era name if present.
+    ctl = equity_root / "scripts" / "watcher_ctl.sh"
+    if not ctl.exists():
+        ctl = equity_root / "scripts" / "watcher_ctl_upstox.sh"
     flags = _launchctl_status(ctl) if ctl.exists() else {}
     running: list[str] = []
     stopped: list[str] = []
@@ -326,7 +338,7 @@ def build_status_message() -> str:
 
     c = ctx()
     paper_root = Path(c["paper_root"])
-    equity_root = Path(c.get("upstox_root") or (Path.home() / "Projects" / "ew-paper-trading-upstox"))
+    equity_root = Path(c.get("upstox_root") or (Path.home() / "Projects" / "ew-paper-trading-equity"))
 
     if is_equity_profile():
         root = equity_root
@@ -371,7 +383,10 @@ def launchctl_service_flags() -> dict[str, bool]:
 
     c = ctx()
     if is_equity_profile():
-        equity_root = Path(c.get("upstox_root") or (Path.home() / "Projects" / "ew-paper-trading-upstox"))
-        return _launchctl_status(equity_root / "scripts" / "watcher_ctl_upstox.sh")
+        equity_root = Path(c.get("upstox_root") or (Path.home() / "Projects" / "ew-paper-trading-equity"))
+        ctl = equity_root / "scripts" / "watcher_ctl.sh"
+        if not ctl.exists():
+            ctl = equity_root / "scripts" / "watcher_ctl_upstox.sh"
+        return _launchctl_status(ctl)
     paper_root = Path(c["paper_root"])
     return _launchctl_status(paper_root / "scripts" / "watcher_ctl.sh")

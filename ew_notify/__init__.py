@@ -28,6 +28,14 @@ DEFAULT_TOPICS = {
         "alerts_topic": "ew-sk-equity-trade-alert",
         "commands_topic": None,
     },
+    "breakout": {
+        "alerts_topic": "breakout-swing-sk-alerts",
+        "commands_topic": None,
+    },
+    "timeproof": {
+        "alerts_topic": "timeproof-sk-alerts",
+        "commands_topic": None,
+    },
 }
 
 
@@ -49,7 +57,7 @@ def configure(
     _CONTEXT["notify_path"] = Path(notify_path) if notify_path else root / "config" / "notifications.json"
     _CONTEXT["paper_root"] = Path(paper_root).resolve() if paper_root else home / "Projects" / "ew-paper-trading"
     _CONTEXT["upstox_root"] = (
-        Path(upstox_root).resolve() if upstox_root else home / "Projects" / "ew-paper-trading-upstox"
+        Path(upstox_root).resolve() if upstox_root else home / "Projects" / "ew-paper-trading-equity"
     )
 
 
