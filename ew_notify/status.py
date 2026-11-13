@@ -6,7 +6,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
-from ew_notify import ctx, project_root
+from ew_notify import ctx
+from ew_notify.alerts import format_running_pnl, unrealized_pnl_inr
 from ew_notify.flags import (
     coach_active,
     cursor_loop_active,
@@ -51,6 +52,22 @@ def _short_name(instrument_id: str, scan: dict[str, Any] | None = None) -> str:
         "BANKNIFTY": "BN",
     }
     return aliases.get(instrument_id, (scan or {}).get("label") or instrument_id)
+
+
+def _instrument_lot_size(root: Path, instrument_id: str) -> int:
+    data = load_json(root / "config" / "instruments.json")
+    defs = data.get("definitions") or {}
+    row = defs.get(instrument_id) or {}
+    try:
+        if row.get("lot_size"):
+            return max(1, int(row["lot_size"]))
+    except (TypeError, ValueError):
+        pass
+    wcfg = load_watcher_config(root)
+    try:
+        return max(1, int(wcfg.get("lot_size") or 1))
+    except (TypeError, ValueError):
+        return 1
 
 
 def _launchctl_status(ctl_script: Path) -> dict[str, bool]:
@@ -170,6 +187,9 @@ def _positions_block(scans: dict[str, Any], root: Path, *, title: str = "Paper")
 
     day_pnl = 0.0
     day_trades = 0
+    run_pnl = 0.0
+    has_run = False
+    book_pnl: float | None = None
     open_lines: list[str] = []
     flat_names: list[str] = []
 
@@ -178,25 +198,50 @@ def _positions_block(scans: dict[str, Any], root: Path, *, title: str = "Paper")
         if not isinstance(scan, dict):
             scan = {}
         portfolio = scan.get("portfolio") or {}
+        pf = portfolios.get(instrument_id, {})
         if not portfolio:
-            pf = portfolios.get(instrument_id, {})
             portfolio = {
                 "daily_pnl_inr": pf.get("daily_pnl_inr", 0),
+                "total_pnl_inr": pf.get("total_pnl_inr", 0),
                 "trades_today": pf.get("trades_today", 0),
                 "open_position": pf.get("position"),
+            }
+        elif portfolio.get("total_pnl_inr") is None and pf:
+            portfolio = {
+                **portfolio,
+                "total_pnl_inr": pf.get("total_pnl_inr", 0),
             }
 
         pos = portfolio.get("open_position")
         pnl = float(portfolio.get("daily_pnl_inr", 0) or 0)
+        book = float(portfolio.get("total_pnl_inr", 0) or 0)
         trades = int(portfolio.get("trades_today", 0) or 0)
         day_pnl += pnl
         day_trades += trades
+        if instrument_id == "NIFTY":
+            book_pnl = book
         short = _short_name(instrument_id, scan)
 
         if pos:
-            open_lines.append(
-                f"  {short}  {pos['direction'].upper()} @ {pos['entry']}"
-            )
+            ltp = scan.get("ltp")
+            lot = _instrument_lot_size(root, instrument_id)
+            qty = pos.get("qty")
+            head = f"  {short}  {pos['direction'].upper()} @ {pos['entry']}"
+            try:
+                qty_n = int(qty or 0)
+            except (TypeError, ValueError):
+                qty_n = 0
+            if qty_n:
+                head += f"  ·  qty {qty_n}"
+            open_lines.append(head)
+            run = format_running_pnl(pos, ltp, lot, include_qty=False)
+            if run:
+                ltp_bit = f"LTP {ltp}  ·  " if ltp is not None else ""
+                open_lines.append(f"    {ltp_bit}{run}")
+            mark = unrealized_pnl_inr(pos, ltp, lot)
+            if mark is not None:
+                run_pnl += mark
+                has_run = True
             open_lines.append(
                 f"    SL {pos['stop']}  ·  TGT {pos['target']}"
             )
@@ -212,7 +257,16 @@ def _positions_block(scans: dict[str, Any], root: Path, *, title: str = "Paper")
     else:
         lines.append("  Flat all")
 
-    lines.append(f"  Day P&L ₹{day_pnl:.0f}  ·  Trades {day_trades}")
+    day_line = f"  Day P&L ₹{day_pnl:.0f}  ·  Trades {day_trades}"
+    if has_run:
+        if abs(run_pnl) < 0.5:
+            run_txt = "₹0"
+        else:
+            run_txt = f"₹{run_pnl:+.0f}"
+        day_line = f"  Day P&L ₹{day_pnl:.0f}  ·  run {run_txt}  ·  Trades {day_trades}"
+    if book_pnl is not None:
+        day_line += f"  ·  book ₹{book_pnl:.0f}"
+    lines.append(day_line)
     return lines
 
 

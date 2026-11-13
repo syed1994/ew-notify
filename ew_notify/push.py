@@ -27,6 +27,7 @@ def send_push(
     priority: str = "default",
     tags: str = "chart_with_upwards_trend",
     retries: int = 2,
+    markdown: bool = False,
 ) -> bool:
     cfg = load_notify_config()
     if not cfg.get("enabled"):
@@ -45,6 +46,8 @@ def send_push(
         "Priority": priority,
         "Tags": tags,
     }
+    if markdown:
+        headers["Markdown"] = "yes"
 
     for attempt in range(retries):
         req = urllib.request.Request(url, data=data, headers=headers, method="POST")
@@ -66,12 +69,12 @@ def send_push(
     return False
 
 
-def notify_alert(message: str, title: str = "EW Trade") -> bool:
-    return send_push(title, message, priority="high", tags="rotating_light")
+def notify_alert(message: str, title: str = "EW Trade", *, markdown: bool = False) -> bool:
+    return send_push(title, message, priority="high", tags="rotating_light", markdown=markdown)
 
 
-def notify_info(message: str, title: str = "Market Watch") -> bool:
-    return send_push(title, message, priority="default")
+def notify_info(message: str, title: str = "Market Watch", *, markdown: bool = False) -> bool:
+    return send_push(title, message, priority="default", markdown=markdown)
 
 
 def notify_both(title: str, message: str, *, mac_title: str | None = None) -> None:

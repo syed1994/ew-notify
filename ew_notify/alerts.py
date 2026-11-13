@@ -2,7 +2,82 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from ew_notify.flags import coach_active, cursor_loop_active, kite_active, kite_status_lines
+
+
+def unrealized_pnl_inr(
+    position: dict[str, Any] | None,
+    ltp: Any,
+    lot_size: int = 1,
+) -> float | None:
+    """Mark-to-market INR vs entry. None if the position or LTP cannot be used."""
+    if not position or ltp is None:
+        return None
+    try:
+        entry = float(position["entry"])
+        mark = float(ltp)
+        qty = int(position.get("qty") or 0)
+        direction = str(position.get("direction") or "")
+        lot = int(lot_size or 1)
+    except (TypeError, ValueError, KeyError):
+        return None
+    if qty <= 0 or lot <= 0 or direction not in ("long", "short"):
+        return None
+    sign = 1 if direction == "long" else -1
+    return (mark - entry) * sign * qty * lot
+
+
+def unrealized_r(position: dict[str, Any] | None, ltp: Any) -> float | None:
+    """Current R vs initial stop."""
+    if not position or ltp is None:
+        return None
+    try:
+        entry = float(position["entry"])
+        mark = float(ltp)
+        stop0 = float(position.get("initial_stop") or position.get("stop"))
+        direction = str(position.get("direction") or "")
+    except (TypeError, ValueError, KeyError):
+        return None
+    risk = abs(entry - stop0)
+    if risk <= 0 or direction not in ("long", "short"):
+        return None
+    if direction == "long":
+        return (mark - entry) / risk
+    return (entry - mark) / risk
+
+
+def format_running_pnl(
+    position: dict[str, Any] | None,
+    ltp: Any,
+    lot_size: int = 1,
+    *,
+    include_qty: bool = True,
+) -> str:
+    """Compact iPhone fragment, e.g. `run ₹+480 (0.09R) · qty 400`."""
+    pnl = unrealized_pnl_inr(position, ltp, lot_size)
+    if pnl is None:
+        return ""
+    r = unrealized_r(position, ltp)
+    if abs(pnl) < 0.5:
+        text = "run ₹0"
+    else:
+        text = f"run ₹{pnl:+.0f}"
+    if r is not None:
+        text = f"{text} ({r:.2f}R)"
+    if include_qty:
+        try:
+            qty = int((position or {}).get("qty") or 0)
+        except (TypeError, ValueError):
+            qty = 0
+        if qty:
+            text = f"{text} · qty {qty}"
+    return text
+
+
+def _exec_kind(execution: str) -> str:
+    return "SANDBOX" if execution in ("upstox_sandbox", "sandbox", "upstox") else "PAPER"
 
 
 def build_trade_entry_alert(
@@ -86,6 +161,96 @@ def build_square_off_alert(
         "",
         "✓ Watcher flat for rest of day unless new signal",
     ])
+
+
+def build_open_pnl_alert(
+    direction: str,
+    entry: float,
+    stop: float,
+    target: float | None,
+    ltp: float,
+    pnl: float,
+    *,
+    qty: int | None = None,
+    r_multiple: float | None = None,
+    execution: str = "paper",
+    instrument: str | None = None,
+) -> str:
+    kind = _exec_kind(execution)
+    name = (instrument or "").upper() or "—"
+    if abs(pnl) < 0.5:
+        run = "run  ₹0"
+    else:
+        run = f"run  ₹{pnl:+.0f}"
+    if r_multiple is not None:
+        run += f"  ({r_multiple:.2f}R)"
+    try:
+        qty_n = int(qty or 0)
+    except (TypeError, ValueError):
+        qty_n = 0
+    if qty_n:
+        run += f"  ·  qty {qty_n}"
+    tgt = "—" if target is None else target
+    return "\n".join([
+        f"{kind} OPEN  ·  {name}  ·  {direction.upper()}",
+        "",
+        f"  LTP {ltp}  ·  entry {entry}",
+        f"  {run}",
+        f"  SL {stop}  ·  TGT {tgt}",
+        "",
+        "✓ Paper position still open",
+        "→ Honor stop/target",
+    ])
+
+
+def build_open_pnl_book_alert(rows: list[dict[str, Any]]) -> str:
+    """Combined running-P&L body when more than one name is open."""
+    if not rows:
+        return "PAPER OPEN  ·  flat"
+    if len(rows) == 1:
+        row = rows[0]
+        return build_open_pnl_alert(
+            direction=str(row.get("direction") or ""),
+            entry=float(row["entry"]),
+            stop=float(row["stop"]),
+            target=row.get("target"),
+            ltp=float(row["ltp"]),
+            pnl=float(row["pnl"]),
+            qty=row.get("qty"),
+            r_multiple=row.get("r_multiple"),
+            execution=str(row.get("execution") or "paper"),
+            instrument=str(row.get("instrument") or ""),
+        )
+    book = 0.0
+    lines = ["PAPER OPEN", ""]
+    for row in rows:
+        name = str(row.get("instrument") or "—").upper()
+        direction = str(row.get("direction") or "").upper()
+        pnl = float(row.get("pnl") or 0)
+        book += pnl
+        r = row.get("r_multiple")
+        try:
+            qty_n = int(row.get("qty") or 0)
+        except (TypeError, ValueError):
+            qty_n = 0
+        if abs(pnl) < 0.5:
+            run = "run ₹0"
+        else:
+            run = f"run ₹{pnl:+.0f}"
+        if r is not None:
+            run += f" ({float(r):.2f}R)"
+        if qty_n:
+            run += f" · qty {qty_n}"
+        lines.append(
+            f"  {name}  {direction} @ {row.get('entry')}  ·  LTP {row.get('ltp')}"
+        )
+        lines.append(f"  {run}")
+    if abs(book) < 0.5:
+        book_txt = "₹0"
+    else:
+        book_txt = f"₹{book:+.0f}"
+    lines.extend(["", f"  book run  {book_txt}", "", "→ Honor stop/target"])
+    return "\n".join(lines)
 
 
 def build_start_message(watcher_result: str) -> str:
